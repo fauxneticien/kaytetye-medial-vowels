@@ -1,0 +1,54 @@
+[submodule "data/raw/b016"]
+	path = data/raw/b016
+	url = git@bitbucket.org:kphon/b016.git
+[submodule "data/raw/b001"]
+	path = data/raw/b001
+	url = git@bitbucket.org:kphon/b001.git
+[submodule "data/raw/b002"]
+	path = data/raw/b002
+	url = git@bitbucket.org:kphon/b002.git
+[submodule "data/raw/b003"]
+	path = data/raw/b003
+	url = git@bitbucket.org:kphon/b003.git
+[submodule "data/raw/b004"]
+	path = data/raw/b004
+	url = git@bitbucket.org:kphon/b004.git
+[submodule "data/raw/b005"]
+	path = data/raw/b005
+	url = git@bitbucket.org:kphon/b005.git
+[submodule "data/raw/b006"]
+	path = data/raw/b006
+	url = git@bitbucket.org:kphon/b006.git
+[submodule "data/raw/b007"]
+	path = data/raw/b007
+	url = git@bitbucket.org:kphon/b007.git
+[submodule "data/raw/b008"]
+	path = data/raw/b008
+	url = git@bitbucket.org:kphon/b008.git
+[submodule "data/raw/b009"]
+	path = data/raw/b009
+	url = git@bitbucket.org:kphon/b009.git
+[submodule "data/raw/b010"]
+	path = data/raw/b010
+	url = git@bitbucket.org:kphon/b010.git
+[submodule "data/raw/b011"]
+	path = data/raw/b011
+	url = git@bitbucket.org:kphon/b011.git
+[submodule "data/raw/b012"]
+	path = data/raw/b012
+	url = git@bitbucket.org:kphon/b012.git
+[submodule "data/raw/b013"]
+	path = data/raw/b013
+	url = git@bitbucket.org:kphon/b013.git
+[submodule "data/raw/b014"]
+	path = data/raw/b014
+	url = git@bitbucket.org:kphon/b014.git
+[submodule "data/raw/b015"]
+	path = data/raw/b015
+	url = git@bitbucket.org:kphon/b015.git
+[submodule "data/raw/b017"]
+	path = data/raw/b017
+	url = git@bitbucket.org:kphon/b017.git
+[submodule "data/raw/b018"]
+	path = data/raw/b018
+	url = git@bitbucket.org:kphon/b018.git
