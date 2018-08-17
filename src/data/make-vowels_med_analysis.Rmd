@@ -1,0 +1,447 @@
+---
+title: "Preprocess annotations and formant data"
+author: "Nay San"
+date: 'Generated `r format(Sys.time(), "%F %R UTC%z")`'
+output:
+  html_notebook: 
+    code_folding: hide
+    number_sections: yes
+    toc: yes
+params:
+    kdict_path: "../../data/raw"
+    preview_rows: 5
+    round_digits: 2
+    write_csvs: false
+    output_path: "../../data/processed"
+---
+
+```{r Setup, message=FALSE, warning=FALSE}
+# Set up code
+    
+# Use if kdict package not installed, run 'devtools::install_github("fauxneticien/kdict")'
+library(kdict)
+library(DT)
+    
+diagnostics <- list()
+    
+# Helpers
+preview_df <- function(df, ...) {
+    df %>%
+    ungroup() %>% 
+    slice(1:params$preview_rows) %>%
+        mutate_if(is.numeric, funs(round(., digits = params$round_digits))) %>% 
+        datatable(rownames = FALSE, ...)
+}
+    
+show_diag_df <- function(diagnostics_df, ...) {
+    diagnostics_df %>% 
+        mutate_if(is.numeric, funs(round(., digits = params$round_digits))) %>%
+        datatable(rownames = FALSE, ...)
+}
+```
+
+# About
+
+This R Markdown document steps through pre-processing the raw annotations (e.g. `b001_file01_ns.TextGrid`) and formant (e.g. `b001_file01.formants.forest.csv`) data, located in the default path of ``r params$kdict_path`` relative to the root of the project (this Rmd file should be in `src/data`).
+
+Code blocks are hidden by default, so press the `Code` buttons on the top right to see each processing block, or 'Show all code' on the top right of this document.
+
+***<span style="color:red">Note</span>***. Semantically-meaningful word-seperators are used in variable names. Unprocessed data columns have `.` in their name (e.g. `vowel.text`), while derived/transformed data have `_` in their name (e.g. `vowel_num`).
+
+By default, `r params$preview_rows` first 5 rows from various steps of the data processing are showed (and numbers are rounded to 2 decimal places). Change this by adjusting the `preview_rows` and `round_digits` parameters at the top of the R Markdown file.
+
+At the end of each step of the data transformation step, there are various diagnostics, which report commonly-occuring data entry errors by annotators. 
+
+# Annotations (raw data)
+
+## Read in all TextGrid data from ``r params$kdict_path`` into a data frame {.tabset}
+
+In particular, we read in the `ipa` and `vowels` tiers, and place them into a list of two data frames, called `kdicts_dfs`.
+
+```{r Make kdict_dfs, message=FALSE, warning=FALSE}
+kdict_dfs <- read_kdict_tiers(
+        kdict_path = params$kdict_path,
+        tier_names = c("ipa", "vowels")
+    ) %>%
+    split(.$tier_name) %>%
+    map(~ select(., -tier_name) %>% mutate(annotator = str_to_lower(annotator)))
+```
+
+### Data from `ipa` tier
+
+Since each file generally has two repetitions of a word, this data frame's unit of observation is at the repetition level (i.e. not word level), and we name the columns accordingly (e.g. using `rep.txt` and not `word.text`).
+
+```{r Preview ipa data frame}
+kdict_dfs$ipa <- kdict_dfs$ipa %>%
+    group_by(source_file, annotator) %>%
+    rename(rep.xmin = xmin, rep.xmax = xmax, rep.text = text) %>%
+    filter(nzchar(str_remove_all(rep.text, "\\s"))) %>%
+    mutate(rep_num = 1:n()) %>%
+    ungroup()
+    
+kdict_dfs$ipa %>%
+    preview_df(caption = "Word repetition annotation data from the 'ipa' tiers")
+```
+
+### Data from `vowels` tier
+
+```{r Preview vowel data frame}
+kdict_dfs$vowels <-
+    kdict_dfs$vowels %>%
+    rename(vowel.xmin = xmin, vowel.xmax = xmax, vowel.text = text)
+
+kdict_dfs$vowels %>%
+    filter(nzchar(vowel.text)) %>% 
+    preview_df(caption = "Vowel annotations data from the 'vowel' tiers")
+```
+
+### Resulting joined data
+
+We join the two data frames by their common `source_file`, and keep only the resulting rows where the vowel's midpoint is within the repetition's time range see `mutate(xmid = vowel.xmin + (vowel.xmax - vowel.xmin) / 2)` and `filter(xmid >= rep.xmin, xmid <= rep.xmax)` in the code below.
+
+```{r Make vowel_reps_df and preview result}
+vowels_reps_df <-
+    kdict_dfs$vowels %>%
+    filter(str_detect(vowel.text, get_vowels_regex())) %>% 
+    mutate(xmid = vowel.xmin + (vowel.xmax - vowel.xmin) / 2) %>% 
+    left_join(
+        y  = kdict_dfs$ipa,
+        by = c("annotator", "source_file") 
+    ) %>%
+    filter(xmid >= rep.xmin, xmid <= rep.xmax) %>%
+    select(-xmid)
+    
+vowels_reps_df %>%
+    preview_df(caption = "Joined data betwen 'vowel' and 'ipa' tiers")
+```
+
+
+## Diagnostics {.tabset}
+
+### Mismatched repetition counts
+
+The data frame below displays the files for which annotators have differing number of repetition-level transcriptions within the `source_file`.
+
+```{r Make diagnostics$word_counts_mismatched}
+diagnostics$word_counts_mismatched <-
+    kdict_dfs$ipa %>%
+    group_by(source_file, annotator) %>%
+    summarise(reps_total = max(rep_num)) %>%
+    group_by(source_file) %>%
+    filter(n_distinct(reps_total) > 1) %>%
+    spread(annotator, reps_total)
+    
+diagnostics$word_counts_mismatched %>%
+    show_diag_df(caption = "Mismatched number of repetitions on 'ipa' tier within each file")
+```
+
+
+### Non-vocalic labels
+
+The following data displays counts on the columns of non-vocalic labels on the `vowels` tier within the each `source_file`. These labels are not analysed, so one should make sure no false negatives in the columns (i.e. vowel labels that should be analysed but have been mistakenly caught by this filter).
+
+```{r Make diagnostics$unanalysed_vowel_tier_labels, message=FALSE}
+diagnostics$unanalysed_vowel_tier_labels <-
+    anti_join(
+        x = kdict_dfs$vowels,
+        y = vowels_reps_df
+    ) %>% 
+    filter(!is.na(vowel.text)) %>%
+    # mutate(text = str_remove_all(text, ":|\\?|'|#|ˈ|ː")) %>% 
+    group_by(source_file, annotator, vowel.text) %>% 
+    tally() %>%
+    spread(key = vowel.text, value = n)
+    
+diagnostics$unanalysed_vowel_tier_labels %>%
+    show_diag_df(caption = "Non-vocalic labels on the 'vowels' tiers")
+```
+
+
+### Orphaned transcriptions
+
+The data frame below displays repetition-level transcriptions for which no vowels have been assigned. Likely only the `ipa` tier in the `source_file` has been completed, and not the `vowels` tier as well.
+
+```{r Make diagnostics$orphaned_reps, message=FALSE}
+diagnostics$orphaned_reps <- 
+    kdict_dfs$ipa %>%
+    anti_join(select(vowels_reps_df, source_file, rep_num, annotator)) %>% 
+    filter(str_detect(rep.text, get_vowels_regex()))
+    
+diagnostics$orphaned_reps %>%
+    show_diag_df(caption = "Orphaned transcriptions on 'ipa' tier, unmatched by any interval on its 'vowel' tier")
+```
+
+### Vowelless transcriptions
+
+The data frame below displays likely incomplete repetition-level transcriptions, in which no vowels were detected.
+
+```{r Make diagnostics$novowel_ipa}
+diagnostics$novowel_ipa <-
+    kdict_dfs$ipa %>%
+    filter(!str_detect(rep.text, get_vowels_regex()), nzchar(str_remove_all(rep.text, "\\s")))
+    
+diagnostics$novowel_ipa %>%
+    show_diag_df(caption = "Vowelless transcriptions")
+```
+
+# Annotations (derived data)
+
+## Consonantal context
+
+We derive consonantal context (`const_ctx`) by stripping both `vowel.text` and `rep.text` of various diacritics; the diacritic-stripped version of these columns are called `base_vowel` and `base_transcription`, respectively.
+
+We then derive, for each annotator and word repetition, the consonantal contexts of all vowels on the `vowels` tier by matching them to the vowels present on the `ipa` tier.
+
+Of course, if they cannot be exactly matched, the `const_ctx` returned will be `NA` for the **whole repetition** (such mismatches are given in a diagnostics data frame at the end of this section).
+
+```{r Make vowels_contexts_df}
+vowels_contexts_df <-
+    vowels_reps_df %>%
+    mutate(
+        base_transcription = remove_diacritics(rep.text) %>% str_remove_all(":|\\?|'|#|ˈ|ː| "),
+        base_vowel         = remove_diacritics(vowel.text) %>% str_remove_all(":|\\?|'|#|ˈ|ː|j|ɹ|ɺ|w| "),
+        rep_vowels         = future_map_chr(base_transcription, ~ str_extract_all(., get_vowels_regex()) %>% unlist(use.names = FALSE) %>% paste0(collapse = ""))
+    ) %>%
+    group_by(source_file, annotator, rep.xmin, rep.xmax, base_transcription) %>%
+    nest() %>%
+    mutate(
+        base_vowel = map(data, ~ .$base_vowel),
+        const_ctx = future_map2(base_transcription, base_vowel, ~ get_cons_context(.x, .y))
+    ) %>%
+    select(-base_vowel) %>%
+    unnest()
+    
+vowels_contexts_df %>%
+    select(base_vowel, base_transcription, const_ctx, vowel.xmin, vowel.xmax, rep_num, annotator, source_file) %>%
+    preview_df(caption = "Consonantal context for vowel dervied from repetition-level transcription data")
+```
+
+## Diagnostics {.tabset}
+
+### Mismatched boundary markers
+
+Initial- and final-vowels are required to be marked by `#` on, respectively, the left- and right-edge of intervals on the `vowels` tier.
+The following table displays vowels on the `vowels` tier for which the derived consonantal context was either initial or final, but '#' had not been detected as present in the interval(s) on the `vowels` tier.
+
+```{r Make diagnostics$mismatched_edges}
+diagnostics$mismatched_edges <-
+    vowels_contexts_df %>%
+    filter(str_detect(const_ctx, "#"), !str_detect(vowel.text, "#"))
+
+diagnostics$mismatched_edges %>%
+    select(source_file, annotator, rep_num, vowel.xmin, vowel.xmax, const_ctx, vowel.text, base_transcription) %>% 
+    show_diag_df()
+```
+
+
+### Mismatched vowels
+
+The following data frame displays repetitions where where `ipa` tier's vowels and `vowels` tier's vowels are mismatched within the given annotator's `source_file`.
+
+```{r Make diagnostics$ipa_vowels_mismatched}
+diagnostics$ipa_vowels_mismatched <-
+    vowels_contexts_df %>% 
+    rename(ipa_tier_vowels = rep_vowels) %>% 
+    group_by(source_file, annotator, rep_num, base_transcription, ipa_tier_vowels) %>%
+    summarise(vowels_tier_vowels = paste0(base_vowel, collapse = "")) %>%
+    ungroup %>% 
+    filter(vowels_tier_vowels != ipa_tier_vowels)
+
+diagnostics$ipa_vowels_mismatched %>%
+    show_diag_df(caption = "Word repetitions where 'ipa' and 'vowels' tiers' vowels are mismatched")
+```
+
+
+### Underivable consonantal context
+
+The data frame below displays vowels for which consonantal context could not be derived. 
+Troubleshooting for these observations will probably require a bit of detective work.
+
+```{r Make diagnostics$const_ctx_na}
+diagnostics$const_ctx_na <-
+    vowels_contexts_df %>%
+    filter(is.na(const_ctx))
+    
+diagnostics$const_ctx_na %>%
+    select(source_file, annotator, rep_num, vowel.xmin, vowel.xmax, base_vowel, base_transcription, const_ctx) %>% 
+    show_diag_df()
+```
+
+# Medial vowels, pre-processed
+
+Excluding any vowels in the diagnostic tables above, we know that within the remaining data that a) vowels and ipa tiers' vowel labels are matched and, therefore, b) we have a dervied cosonantal context.
+
+Thus, we can exclude all initial and final vowels (i.e. where `#` detected in `const_ctx`), and then further exclude repetitions for which annotators disagree on the number of medial vowels.
+
+Finally, we also exclude vowel transcriptions not having at least 2 different annotators.
+
+```{r Make vowels_med_preprocessed, message=FALSE}
+vowels_med_raw <-
+    vowels_contexts_df %>%
+    filter(!str_detect(const_ctx, "#"), nchar(base_vowel) == 1) %>%   # Keep only medial monophthongs
+    reduce(.x = diagnostics, .f = anti_join, .init = .)               # Discard vowels with any matches in any of the diagnostics data frames
+    
+vowels_med_preprocessed <-
+    vowels_med_raw %>% 
+    group_by(source_file, rep_num, annotator) %>%
+    nest() %>%
+    mutate(n_vowels = map_int(data, nrow)) %>%                       # find number of vowels per word rep per annotator
+    group_by(source_file, rep_num) %>%
+    filter(n_distinct(n_vowels) == 1) %>%                            # keep word rep iff all annotator agree on num of vowels
+    select(-n_vowels) %>%
+    unnest() %>%
+    
+    group_by(source_file, rep_num, annotator) %>%                    # given all annotators agree, only now give sequential ids
+    mutate(vowel_num = 1:n()) %>%                                    #   to vowel tokens within word repetitions (e.g. rep 2 vowel 1)
+
+    group_by(source_file, rep_num, vowel_num) %>%
+    filter(dplyr::n_distinct(annotator) >= 2) %>%                    # keep only vowel tokens with more than 1 annotator
+    ungroup() %>%
+
+    select(
+        source_file, rep_num, vowel_num, base_vowel, const_ctx, base_transcription, annotator,
+        vowel.text, vowel.xmin, vowel.xmax, rep.text, rep.xmin, rep.xmax
+    )
+    
+vowels_med_preprocessed %>%
+    select(source_file, rep_num, vowel_num, base_vowel, const_ctx, annotator, vowel.xmin, vowel.xmax) %>% 
+    preview_df(caption = "Preprocessed medial vowel annotations with at least 2 transcribers per vowel")
+```
+
+# Join corresponding mid-point formant values for pre-processed medial vowels
+
+## Read in formant data and remove outliers {.tabset}
+
+```{r Formants helpers, include=FALSE}
+remove_outlier_formants <- function(df) {
+    n_formants  <- 2
+    forest_cols <- paste0("forest.f", 1:n_formants)
+    praat_cols  <- paste0("praat.f", 1:n_formants)
+    
+    df %>%
+        # Undo any current grouping for performing row-wise calculations
+        ungroup %>%
+        
+        separate(forest, forest_cols) %>% 
+        separate(praat, praat_cols, sep = "-") %>%
+        mutate_at(vars(matches("forest|praat")), funs(suppressWarnings(as.numeric(.)))) %>%
+        mutate(
+            # Z-normalise all F1 and F2 measures, and diffs
+            forest.f1_z = scale(forest.f1),
+            forest.f2_z = scale(forest.f2),
+            praat.f1_z  = scale(praat.f1),
+            praat.f2_z  = scale(praat.f2),
+            # Difference in Hz between Forest and Praat trackers
+            f1_diff_z     = scale(forest.f1 - praat.f1),
+            f2_diff_z     = scale(forest.f2 - praat.f2)
+        ) %>% 
+        filter(
+            # Keep only measures both within 3 standard deviations of
+            # within-tracker mean and between-tracker difference mean
+            between(forest.f1_z, -3, 3), between(forest.f2_z, -3, 3),
+            between(praat.f1_z, -3, 3), between(praat.f2_z, -3, 3),
+            between(f1_diff_z, -3, 3), between(f2_diff_z, -3, 3)
+        ) 
+}
+```
+
+
+### Raw data
+
+Read in in raw data for each format tracker (forest, praat) from all `formants.*.csv` files under the `r params$kdict_path` directory.
+
+```{r Make kdict_formants}
+kdict_formants <- read_kdict_formants(kdict_path = params$kdict_path)
+    
+kdict_formants %>%
+    sample_n(10) %>%
+    preview_df()
+```
+
+### Select mid-point formants, then remove outliers
+
+We define outliers here as any datum outside 3 standard deviations of the respective mean.
+We thus derive and filter based on z-scores for:
+
+- a) within-tracker variance, and
+- b) difference in measurement between the Forest and Praat formant trackers
+
+
+```{r Make formants_preprocessed}
+formants_preprocessed <-
+    vowels_med_preprocessed %>%
+    select(source_file, rep_num, annotator, vowel_num, vowel.xmin, vowel.xmax) %>%
+    left_join(kdict_formants, by = "source_file") %>%
+    filter(time >= vowel.xmin, time <= vowel.xmax) %>%
+
+    group_by(source_file, rep_num, annotator, vowel_num, tracker) %>%
+    filter(row_number() == ceiling(n()/2)) %>% # keep only mid-point measure
+    ungroup() %>%
+
+    unite(formants, f1, f2, sep = "-") %>%
+    select(source_file, rep_num, annotator, vowel_num, tracker, formants) %>%
+    spread(tracker, formants) %>%
+    remove_outlier_formants()
+    
+formants_preprocessed %>%
+    preview_df(caption = "Formant values filtered on being within +/- 3 SD of respective means for {forest,praat}.f{1,2}_z and f{1,2}_diff_z")
+```
+
+# Analysis data frame for medial vowels
+
+```{r Make vowels_med_analysis, message=FALSE}
+vowels_med_analysis <- 
+    left_join(
+        x = vowels_med_preprocessed,
+        y = select(formants_preprocessed, -contains("diff"))
+    ) %>%
+    filter_all(all_vars(!is.na(.))) %>%
+    group_by(source_file, rep_num, vowel_num)
+    
+med_analysis_coverage <-
+    `/`(
+        nrow(vowels_med_analysis),
+        nrow(vowels_med_raw)
+    ) %>%     
+    `*`(100) %>% 
+    round(digits = 0) 
+    
+vowels_med_analysis %>%
+    ungroup() %>% 
+    sample_n(10) %>% 
+    select(source_file:const_ctx, annotator, forest.f1:praat.f2_z)
+    
+```
+
+## Coverage of pre-processed dataset: `r med_analysis_coverage`%
+
+The analysis data in `vowels_med_analysis` retains `r nrow(vowels_med_analysis)` rows out of `r nrow(vowels_med_raw)` in `vowels_med_raw`.
+
+# Write data (not run by default) 
+
+## Write `vowels_med_analysis.csv`
+
+To have data (over)written, change the `write_csvs` parameter.
+
+```{r Write vowels_med_analysis, eval = params$write_csvs}
+readr::write_csv(
+    x    = vowels_med_analysis,
+    path = file.path(params$output_path, "vowels_med_analysis.csv")
+)
+```
+
+## Write `diagnostics/*.csv`
+
+```{r Write diagnostics, eval = params$write_csvs}
+diags_dir <- file.path(params$output_path, "diagnostics")
+    
+if(!dir.exists(diags_dir)) { dir.create(diags_dir) }
+
+diagnostics %>%
+    iwalk(~ readr::write_csv(x = .x, path = file.path(diags_dir, paste0(.y, ".csv")), na = ""))
+```
+
+
+<style type="text/css">
+h1, h2, h3, h4, h5 { font-size:1.1em }
+</style>

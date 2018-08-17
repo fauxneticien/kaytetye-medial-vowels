@@ -56,7 +56,7 @@ set.seed(16)       # set seed for sample.int(n()) to be reproducible
 
 mICL_df <-
     expand.grid(
-        iteration = 1:2,
+        iteration = 1:10000,
         tracker = c("forest", "praat"),
         stringsAsFactors = FALSE
     ) %>%
@@ -71,9 +71,9 @@ mICL_df <-
             .progress = TRUE
         )
     )
-    
+
 mICL_df %>%
     select(-data) %>%
     tidyr::unnest(mICL) %>%
     readr::write_csv(here("data/processed/micl_results.csv"))
-    
+
