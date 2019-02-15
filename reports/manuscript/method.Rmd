@@ -1,0 +1,249 @@
+---
+title: "Reproducible method section for Kaytetye medial vowels paper"
+author: "Nay San"
+date: "Generated `r format(Sys.time(), '%F %R UTC%z')`"
+output:
+  html_notebook:
+    code_folding: hide
+    number_sections: yes
+    toc: yes
+  html_document:
+    df_print: kable
+    number_sections: no
+    toc: yes
+---
+
+```{r Setup, message=FALSE, warning=FALSE, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+    
+library(tidyverse)
+library(here)
+library(DT)    
+
+kdb_headwords <- 4697        # Derived from KDB.txt version 280329bf1e3f08f8421363772f30a4a9b611e2e3
+headwords_recorded <- 2816   # Same figure as reported in San (2016) MRes thesis, p. 13
+today <- format(Sys.time(), "%d %B %Y")
+
+headwords <- read_csv(here("data/external/headwords.csv"), col_types = "cc")
+vowels_med_analysis <- read_csv(here("data/processed/vowels_med_analysis.csv"), col_types = "ciicccccddcdddddddddd")
+    
+# Some helpers
+placeholder <- '<span style="color:red">X</span>'
+```
+
+# Stimuli
+
+The headwords within the Kaytetye print dictionary (Turpin & Ross, 2012) were read aloud by AR, a 41-year-old native speaker of Kaytetye who is literate in both Kaytetye and English.
+Two repetitions of each headword were produced, cited and uttered in uninflected forms. Derived words and reduplications listed in the dictionary were not recorded.
+Data from these recordings sessions account for `r headwords_recorded` headwords out of the `r kdb_headwords` currently listed in Kaytetye lexicon database.
+
+The recordings were made at the University of Queensland Music Department’s Recording Studio on a Roland Portable Recording Unit R-26 and were encoded at a sample rate of 48000 Hz in 24-bit wave format.
+The microphone varied between the recording sessions—the Roland R-26 internal microphone was used on Day 1 and a 106 Sony ECM 44S condenser microphone on Day 2.
+Turpin monitored the recordings throughout the sessions.
+
+# Word selection
+
+```{r Calculated unique headwords analyzed, include=FALSE}
+headwords_unique <-
+    vowels_med_analysis %>%
+    left_join(headwords) %>%
+    group_by(headword) %>%
+    tally() %>%
+    nrow()
+```
+
+The total number of unique headwords analyzed in this paper is `r headwords_unique`, which amounts to `r round(headwords_unique / headwords_recorded * 100, 1)`% of the `r headwords_recorded` recorded headwords, and `r round(headwords_unique / kdb_headwords * 100, 1)`% of the currently known Kaytetye lexicon.
+The analyses are based on phonetic transcriptions which form part of an ongoing project that will eventually obtain phonetic transcription of the `r headwords_recorded` recordings by at least two independent transcribers.
+For practicality, transcription jobs were broken into collections of headwords, or 'batches'<!-- , an overview of which is provided in Table `r placeholder` //-->.
+As of `r today`, there have been `r unique(headwords$headword) %>% length()` words selected across `r str_extract(headwords$source_file, "b\\d+") %>% unique() %>% length()` batches.
+For the initial batches (b001-b009), the headword forms were selected by one of the authors to ensure adequate coverage for developing and refining annotation instructions.
+For all subsequent batches (b010-), headword forms were randomly pooled from those which had not been assigned to previous batches.
+After the selection step for all batches, the headwords were anonymized and these anonymized files were supplied to transcribers (e.g. audio given as `b018_162.wav` and not `artnangke.wav`).
+<!-- For each batch, Table `r placeholder` also displays the proportion of selected headwords within each batch which satisfies the pre-processing criteria for the current analyses (e.g. have been annotated by at least 2 different people; pre-processing steps outlined further below). //-->
+
+```{r Batch table, message=FALSE, include=FALSE}
+# 2018-08-16. Decided not to report project-internal breakdowns of how various transcription batches are progressing (e.g. b001 100% complete, b015 50% complete, etc.)
+headwords %>%
+    mutate(batch = str_extract(source_file, "b\\d+")) %>% 
+    left_join(select(vowels_med_analysis, source_file, annotator)) %>%
+    group_by(batch, source_file, headword, annotator) %>%
+    summarise(in_analysis_set = ifelse(all(is.na(annotator)), FALSE, TRUE)) %>%
+    group_by(batch, source_file, headword) %>%
+    summarise(has_2_annotators = sum(in_analysis_set) >= 2) %>%
+    group_by(batch) %>%
+    summarise(
+        n_over_2 = sum(has_2_annotators),
+        total    = n()
+    ) %>%
+    mutate(
+        coverage = (n_over_2 / total * 100) %>% round(digits = 1)
+    ) %>%
+    select(
+        Batch = batch,
+        `Headwords selected`  = total,
+        `Headwords analyzed`  = n_over_2,
+        `Percent analyzed`    = coverage
+    ) 
+```
+
+# Annotation
+
+## Background of transcribers
+
+The language backgrounds and phonetic transcription experience of transcribers no doubt exert an influence on their transcriptions.
+Thus, we took several steps to minimize the influence of 'top-down' lexical and phonological knowledge on the phonetic transcriptions.
+Firstly, as mentioned, headwords were anonymized prior to being dispatched for transcription, and transcribers therefore did not have access to any orthographic information about the vowels (consonants discussed below).
+Secondly, we intentionally recruited phonetically-trained but Kaytetye-naïve transcribers to create multiple, independent transcriptions of the headwords.
+For this paper, vowels were not analyzed if at least two independent transcriptions were not yet available (exclusion criteria described further below).
+Relevant background information for all transcribers are reported in the Appendix.
+
+## Consonantal skeleton generation
+
+While transcribers were not given orthographic forms of the headwords (e.g. *arralkenke* 'to yawn'), they were however provided basic information about the consonantal structure in IPA forms (e.g. ɾ in place of *rr*).
+Unlike for vowels, the consonantal place oppositions of Kaytetye follow the standard Maximal Australian inventory (Fletcher & Butcher, 2014, p. 101–102).
+Thus, as vowels were the priority of the project, transcribers were provided with consonantal skeletons, which were derived by converting the orthographic forms to hypothetical IPA forms, and then removing the vowel symbols—e.g. *arralkenke* → [ɐɾɐlkənkə] → [ɾlknk].
+Additionally, as the Kaytetye glides /w, j/ have been described to interact with vowels to render various further vocalic qualities (e.g. diphthongs), the IPA labels [w] and [j] were also removed from the skeletons—with the goal being annotators will be required to fill in perceived semi-vocalic qualities where they do.
+It was emphasized that provided skeletons were hypothetical forms, and transcribers were instructed to replace or remove any IPA labels where they disagreed with the script-generated labels.
+
+## Annotation environment
+
+All annotations of the sound files were carried out in Praat (Boersma & Weenink, 2018).
+Annotators were given separate anonymized sound files and accompanying TextGrid, and annotators did not see each other's transcriptions.
+At the start of each session, annotators reset all Praat settings and turned off all overlays.
+Spectrogram settings were adjusted to the following values: View range, 0-8 kHz; Dynamic range: 40.0 dB.
+Waveform settings were left to Praat’s standard values.
+Pitch and intensity overlays were turned off and were only used as to gather additional cues when necessary, e.g. adjusting the display settings to determine local inflection points in the signal.
+
+## Annotation procedure
+
+The steps reported below gives an overview of the instructions provided to the annotators.
+The full instructions are provided in the Appendix.
+Prior to being given anonymized files to annotate for the first time, all annotators are given test sets for practice and on which they receive feedback.
+
+1. Adjust the word boundaries given by the consonantal skeleton on the IPA tier to approximate locations.
+
+2. For each vocalic interval perceived in the word, give an IPA label placing it within the consonantal skeleton as appropriate, e.g. [ɾlknk] → [ɐɾˈʌlkənk]. Put a stress mark on the left edge of the vowel perceived most prominent within the word.
+
+3. For each IPA vowel label used within the word, place an interval on the Vowels tier and adjust the vowel boundaries to appropriate locations by inspecting changes in the waveform and spectrogram. If the vowel is perceived as the primary stressed vowel, place a stress marker on the left of the label, e.g. [ˈʌ]. If the vowel is word-initial or word-final, place a boundary marker # on the relevant side of the vowel label, e.g. [#ɐ].
+
+Figure `r placeholder` provides an overview of the annotation data generated by the procedure above on two repetitions of a Kaytetye headword *arralkenke* ‘to yawn’, which had been anonymized as `b006_file15.wav` and whose consonantal skeleton was approximated as [ɾlknk], from which two annotators (KR, NS) provided independent transcriptions (placed on the 'IPA' tier) as well as temporal locations for all perceived vocalic intervals (placed on the 'Vowels' tier).
+
+<p align="center">![](`r here("reports/figures/b006_file15_edited.png")`)</p>
+
+**Figure `r placeholder`** An illustration of word-level and vowel-level segmentations by two annotators (KR, NS) of two repetitions of a Kaytetye word *arralkenke* ‘to yawn’, accessed as an anonymized file `b006_file15.wav` with an estimate of the word’s consonantal skeleton (ɾlknk).
+
+# Data pre-processing
+
+## Annotation data
+
+Annotation data from all TextGrids were processed within R (R Core Team, 2018). All processing scripts and resulting data are openly accessible via a Zenodo archive (San et al., 2018). Thus, a conceptual overview is provided here.
+
+Table `r placeholder` provides a sample of 8 rows from our analysis dataset.
+This subset is the result of processing the TextGrid information provided in Figure `r placeholder`.
+As can be seen from the rows, the primary observation units in the dataset are the vowel labels, which had been provided by the annotators (e.g. kr, ns) as TextGrid intervals on the Vowels tier.
+Using the mid-point of the TextGrid intervals, corresponding word-level information (i.e. repetition number and transcription) were then retrieved for each vowel label from transcriptions provided by the annotators on the IPA tier.
+For each vowel label set within a repetition (e.g. [ɐ, ʌ, ə] for repetition 1 annotated by kr) and the corresponding word-level transcription (e.g. [ɐɾʌlkənk]), a consonantal context set was derived (e.g. [#_ɾ, ɾ_l, k_n]).
+Initial- and final-vowels, i.e. those having '#' their derived context, were then excluded, and vowel numbers were assigned to remaining medial vowels, starting from the left (e.g. [ʌ] is the first medial vowel in [ɐɾʌlkənk]). 
+
+```{r Analysis table}
+set.seed(10)
+vowels_med_analysis %>%
+    mutate(midpoint = (vowel.xmin + ((vowel.xmax - vowel.xmin) / 2)) %>% round(digits = 2)) %>% 
+    select(
+        `Vowel label` = base_vowel,
+        `Context` = const_ctx,
+        `Annotator` = annotator,
+        `Medial vowel` = vowel_num,
+        `Vowel midpoint` = midpoint,
+        `Word rep.` = rep_num,
+        `Word IPA` = base_transcription,
+        `File` = source_file
+    ) %>%
+    filter(File == "b006_file15")
+
+```
+
+## Formant data
+
+Formant data for each .wav file (e.g. `b006_file15.wav`) were derived using two formant trackers: Praat and Forest, **For**mant **est**imation function `forest()` from the wrassp R pacakge (Bombien, Winkelmann & Scheffers, 2018).
+Praat formant tracking was performed using the Burg method and the default parameters: Time step 0.0 s, Maximum number of formants: 5, Maximum formant: 5500 Hz, Window length: 0.025 s, Pre-emphasis: 50 Hz.
+Forest formant tracking was also performed using default parameters of the forest() R function: windowShift: 5, windowSize: 30, nominalF1: 500 Hz, numFormants: 4, window: BLACKMAN, preemphasis: derived from sample rate and nominal F1.
+Data from both trackers were exported into corresponding CSV files (e.g. `b006_file15.formants.forest.csv` and ``b006_file15.formants.praat.csv``).
+Table `r placeholder` below provides an overview of the resulting formant data, displaying 3 randomly sampled time points for each tracker for the file `b006_file15`.
+
+```{r Formants table, message=FALSE}
+set.seed(5)
+    
+list.files("../../data/raw/b006/b006_15", pattern = "csv", full.names = TRUE) %>%
+    map(read_csv) %>%
+    map_if(~ ncol(.) == 5, ~ select(., time, f1, f2) %>% mutate(tracker = "forest")) %>%
+    map_if(~ ncol(.) > 5, ~ select(., time = `time(s)`, f1 = `F1(Hz)`, f2 = `F2(Hz)`) %>% mutate(tracker = "praat")) %>%
+    bind_rows() %>%
+    mutate(file = "b006_file15") %>%
+    filter(f1 > 0, f2 > 0) %>%
+    group_by(tracker) %>% 
+    sample_n(3) %>%
+    mutate_if(is.numeric, ~ round(., digits = 2)) %>% 
+    select(
+        File       = file,
+        Tracker    = tracker,
+        `Time (s)` = time,
+        `F1 (Hz)`  = f1,
+        `F2 (Hz)`  = f2
+    )
+
+```
+
+## Analysis dataset
+
+Using the mid-point value of the vowel labels, corresponding first and second formant values for each vowel were retrieved. 
+Table `r placeholder` displays the result of appending formant information to the annotation data.
+For all formant values, z-scores were calculated for both raw values, e.g. for F1 (Praat), F1 (Forest), etc., as well as tracker-differences (e.g. F1 (Forest) - F1 (Praat), F2 (Forest) - F2 (Praat)). 
+
+```{r}
+vowels_med_analysis %>%
+    filter(source_file == "b006_file15", rep_num == 1) %>% 
+    mutate(midpoint = (vowel.xmin + ((vowel.xmax - vowel.xmin) / 2)) %>% round(digits = 2)) %>% 
+    ungroup %>% 
+    mutate_if(is.numeric, ~ round(., digits = 2)) %>% 
+    select(
+        `Vowel label` = base_vowel,
+        `Context` = const_ctx,
+        `Annotator` = annotator,
+        `Medial vowel` = vowel_num,
+        `Vowel midpoint` = midpoint,
+        `Word rep.` = rep_num,
+        `File` = source_file,
+        `F1 (Praat)` = praat.f1,
+        `F2 (Praat)` = praat.f2,
+        `F1 (Forest)` = forest.f1,
+        `F2 (Forest)` = forest.f2
+    )
+
+```
+
+For data sanitization purposes, files with differing number of transcribed word repetitions between annotators were excluded.
+Word repetitions whose vowel label set differed between the Vowels and IPA tiers in the TextGrid were excluded.
+Vowels whose consonantal context could not be derived by the script were excluded.
+Word repetitions for which annotators disagreed on the number of medial vowels were excluded.
+Based on the formant information z-scores, we exlcuded all observations any of whose z-scores lied outside of 3 standard deviations from the mean.
+Vowels for which only observations from a single annotator remained due to these exclusion criteria were also subsequently excluded.
+The resulting sanitised dataset amounted to 64% of the raw medial-vowel data (11703 out of 18165 observations).
+
+# Unsupervised clustering procedure
+
+To quantitatively generate candidate sets of acoustic vowel categories, we performed unsupervised clustering on the z-normalized mid-point $F_1$ and $F_2$ values using finite Gaussian mixture models (GMMs), implemented by the `mclust` R package (v. 5.4.1: Scrucca, Fop, Murphy, & Raftery, 2016).
+GMMs model data as a mixture distribution, comprising a finite number of component Gaussian distributions, $G$, each parameterized by a mean μ and standard deviation σ (e.g. a 1-dimensional bimodal distribution could be modelled as a mixture of two latent Gaussian distributions, $G_1: <μ_1, σ_1>$ and $G_2: <μ_2, σ_2>$, whose peaks occur at $μ_1$ and $μ_2$ respectively).
+Within a given mixture model, optimal parameters were estimated iteratively using the Expectation Maximization algorithm (for an introduction to EM, see Do & Batzoglou, 2008).
+Between mixture models (e.g. 2- vs. 3-component models), the optimal model was determined according to the integrated complete-data likelihood (ICL) criterion (Scrucca et al., 2016, p. 299).
+
+Given that random parameters values are initially selected to be optimized by the EM algorithm, the subsequent fit of a GMM can be limited by the initialization settings.
+Thus, for each distribution of mid-point $F_1$ and $F_2$ values as measured by two separate formant trackers (Forest and Praat), we performed 10,000 iterations of GMM fitting.
+Further, as each vocalic interval was identified by multiple annotators whose marking of the mid-point location may vary slightly (and thus the measured $F_1$ and $F_2$ values), each iteration sampled different combinations of the mid-point locations.
+For analytical reproducibility, we pre-computed random seeds and the same seed was supplied for all procedures involving randomization within a given iteration.
+The fitting process took approximately 4 hours on a dedicated compute server with 24 CPU cores (at 2.2 GHz each) and 256 GB RAM, running Ubuntu 18.04.01 LTS and R 3.5.0.
+
+
+<style type="text/css">
+h1, h2, h3, h4, h5 { font-size:1.1em }
+</style>

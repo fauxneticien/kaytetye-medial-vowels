@@ -1,0 +1,554 @@
+---
+title: "Reproducible results and discussion subsections for Kaytetye medial vowels paper"
+author: "Nay San"
+date: "Generated `r format(Sys.time(), '%F %R UTC%z')`"
+output:
+  html_notebook:
+    code_folding: hide
+    number_sections: no
+    toc: yes
+  html_document:
+    df_print: kable
+    number_sections: no
+    toc: yes
+  word_document:
+    toc: yes
+params:
+    random_seed: 3
+---
+
+```{r Setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(stringsAsFactors = FALSE)    
+    
+library(mclust)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(here)
+library(DT)    
+    
+source(here("src/visualization/mclust-plot_helper.R"))
+source(here("src/data/mclust_helpers.R"))    
+    
+vowels_med_analysis <- read_csv(here("data/processed/vowels_med_analysis.csv"), col_types = "ciicccccddcdddddddddd")
+micl_results <- read_csv(here("data/processed/micl_results.csv"), col_types = "iciicd")    
+
+# Some helpers
+placeholder <- '<span style="color:red">X</span>'
+
+# Set up ggplot theme
+bw_custom <- theme_set(
+    theme_bw(base_size = 14) +
+    theme(
+        legend.position="none",
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank()
+    )
+)
+
+# Some helpers
+placeholder <- '<span style="color:red">X</span>'
+```
+
+# Comparison of all fitted models
+
+Figure `r placeholder` below shows the maxium ICL value for each cluster number over 10,000 iterations; the text labels within the figure show the absolute maximum.
+For both Forest- and Praat-tracker formant values, 4 is the optimal number of clusters, marginally better than 3, but considerably better than both 2 and 5 clusters.
+
+```{r Show max. ICL graphs, message=FALSE, fig.width=6, fig.height=2.5, fig.align='center'}
+micl_best <-
+    micl_results %>%
+    group_by(tracker, G) %>%
+    filter(ICL == max(ICL)) %>%
+    arrange(tracker, G) %>% 
+    ungroup %>% 
+    mutate(Tracker = str_to_title(tracker)) %>%
+    select(Tracker, G, maxICL = ICL, modelName, seed, iteration)
+
+micl_results %>%
+    group_by(iteration, tracker, G) %>%
+    summarise(maxICL = max(ICL)) %>% 
+    ungroup() %>%
+    filter(tracker == "praat") %>% 
+    # mutate(Tracker = str_to_title(tracker)) %>%
+    ggplot(aes(x = as.factor(G), y = maxICL)) +
+    ggrastr::geom_point_rast() +
+    # facet_wrap(~ Tracker, ncol = 2) +
+    ggrepel::geom_label_repel(
+        data = filter(micl_best, Tracker == "Praat"),
+        aes(label = round(maxICL, digits = 0)),
+        arrow = arrow(length = unit(0.03, "npc"), type = "closed", ends = "last"),
+        vjust = -2,
+        hjust = -0.25
+    ) +
+    xlab("G (number of clusters)") +
+    ylab("Max. ICL") 
+    
+```
+**Figure `r placeholder`** Maximum integrated complete-data likelihood (ICL) values from 10,000 iterations of fitting Gaussian mixture models (GMMs) onto z-normalized mid-point formant first and second formant values, measured using two formant trackers (Forest, Praat). Arrowed text labels annotated the maximum ICL value for G, the number of clusters fitted by the GMM. 
+
+# Comparison between optimal models and human annotators
+
+```{r Setup to show optimal models, message=FALSE, include=FALSE}
+group_colors <- c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00")
+group_shapes <- c(0,1,2,5,6)
+
+mclust_best_results <- with(
+    data = micl_best,
+    pmap(
+        list(str_to_lower(Tracker), G, modelName, seed),
+        function(tracker, G, modelName, seed) {
+                df <- sample_vowel_midpoints(tracker = tracker, seed = seed)
+                names(df)[1:2] <- c("f1_z", "f2_z")
+                
+                set.seed(seed)
+                mclust_fit <- Mclust(
+                    data = df[, 1:2],
+                    G = G,
+                    modelName = modelName
+                )
+                
+                classifications <-
+                    cbind(
+                        G,
+                        tracker, 
+                        seed,
+                        df,
+                        clust = mclust_fit$classification,
+                        uncertainty = mclust_fit$uncertainty,
+                        stringsAsFactors = FALSE
+                    ) %>%
+                    left_join(select(vowels_med_analysis, source_file:base_vowel, annotator))
+                
+                centres <-
+                    mclust_fit$parameters$mean %>%
+                    cbind(row.names(.), .) %>%
+                    as_tibble() %>%
+                    set_names(c("formant", 1:mclust_fit$G)) %>%
+                    gather(key = clust, value = centre, -formant) %>%
+                    spread(key = formant, value = centre) %>%
+                    mutate_all(as.numeric)
+                
+                list(
+                    "classifications" = classifications,
+                    "centres" = centres
+                )
+            
+            }
+        )
+    )
+
+# Re-map mclust's [arbitrary] returned cluster numbers of cross-comparable groups
+three_mappings <- . %>%
+    mutate(
+        oclust = clust,
+        clust  = case_when(
+            oclust == 1 ~ 1,
+            oclust == 2 ~ 3,
+            TRUE ~ 2
+        )
+    )
+
+mclust_best_results[[2]]$classifications <- mclust_best_results[[2]]$classifications %>% three_mappings
+mclust_best_results[[2]]$centres <- mclust_best_results[[2]]$centres %>% three_mappings
+mclust_best_results[[6]]$classifications <- mclust_best_results[[6]]$classifications %>% three_mappings
+mclust_best_results[[6]]$centres <- mclust_best_results[[6]]$centres %>% three_mappings
+
+# have to do 4 forest and 4 praat differently :(
+four_f_mappings <- . %>%
+    mutate(
+        oclust = clust,
+        clust  = case_when(
+            oclust == 2 ~ 1,
+            oclust == 1 ~ 2,
+            oclust == 3 ~ 3,
+            TRUE ~ 4
+        )
+    )
+
+mclust_best_results[[3]]$classifications <- mclust_best_results[[3]]$classifications %>% four_f_mappings
+mclust_best_results[[3]]$centres <- mclust_best_results[[3]]$centres %>% four_f_mappings
+
+four_p_mappings <- . %>%
+    mutate(
+        oclust = clust,
+        clust  = case_when(
+            oclust == 1 ~ 1,
+            oclust == 2 ~ 4,
+            oclust == 4 ~ 3,
+            TRUE ~ 2
+        )
+    )
+
+mclust_best_results[[7]]$classifications <- mclust_best_results[[7]]$classifications %>% four_p_mappings
+mclust_best_results[[7]]$centres <- mclust_best_results[[7]]$centres %>% four_p_mappings
+
+# have to do 5 forest and 5 praat differently too :(
+five_f_mappings <- . %>%
+    mutate(
+        oclust = clust,
+        clust = case_when(
+            oclust == 1 ~ 1,
+            oclust == 2 ~ 3,
+            oclust == 5 ~ 2,
+            oclust == 3 ~ 5,
+            TRUE ~ 4
+        )
+    )
+
+mclust_best_results[[4]]$classifications <- mclust_best_results[[4]]$classifications %>% five_f_mappings
+mclust_best_results[[4]]$centres <- mclust_best_results[[4]]$centres %>% five_f_mappings
+
+five_p_mappings <- . %>%
+    mutate(
+        oclust = clust,
+        clust = case_when(
+            oclust == 4 ~ 1,
+            oclust == 3 ~ 2,
+            oclust == 5 ~ 3,
+            oclust == 1 ~ 4,
+            TRUE ~ 5
+        )
+    )
+
+mclust_best_results[[8]]$classifications <- mclust_best_results[[8]]$classifications %>% five_p_mappings
+mclust_best_results[[8]]$centres <- mclust_best_results[[8]]$centres %>% five_p_mappings
+
+```
+
+```{r Setup comparison with annotators, message=FALSE, include=FALSE}
+
+vowel_levels <- c(
+    "a", "æ", "ɐ", "ɑ", "ɒ",
+    "ə", "ɛ", "ɘ", "ɚ", "ɜ",
+    "e", "ε", "i", "ĭ", "ɪ", "ɨ",
+    "o", "ɔ", "u", "ʉ", "ʊ", "ʌ"
+)
+
+tally_pipeline <- . %>%
+    group_by(G, tracker, clust, base_vowel) %>%
+    summarise(n_vowels = n()) %>%
+    ungroup %>%
+    tidyr::complete(G, tracker, clust, base_vowel, fill = list(n_vowels = 0)) %>%
+    group_by(G, tracker, clust) %>% 
+    mutate(
+        pc_vowels   = n_vowels / sum(n_vowels) * 100,
+        clust_total = sum(n_vowels)
+    ) %>% 
+    ungroup %>%
+    mutate(
+        # clust      = paste(clust, " (n = ", clust_total, ")", sep = ""),
+        base_vowel = factor(base_vowel, levels = vowel_levels)
+    )
+
+plot_vowel_tallies <- function(df) {
+    df %>%
+    mutate(clust = paste(max(df$G), "G", clust, sep = "")) %>% 
+    ggplot(aes(x = base_vowel, y = pc_vowels)) +
+    geom_bar(stat = "identity", aes(fill = tracker), position = "dodge", color = "black") +
+    facet_wrap(~ clust, scales = "free_x", ncol = 1) +
+    scale_y_continuous(limits = c(0, 100)) +
+    ylab("Percent label usage within cluster") +
+    xlab("IPA label used by annotators") + 
+    scale_fill_manual(values = c("white", "grey"))
+    # + ggtitle(paste0("G = ", max(df$G)))
+}
+
+mclust_best_tallies <- lapply(mclust_best_results, function(fit) { tally_pipeline(fit$classifications) } )
+
+```
+
+### 2-cluster and 3-cluster models
+
+```{r Plot 2- and 3-cluster models, warning=FALSE, fig.width=12, fig.height=6}
+
+grid.arrange(
+    plot_mclust_formants(mclust_best_results[[5]], group_colors, group_shapes),
+    mclust_best_tallies[[5]] %>% plot_vowel_tallies(),
+    ncol = 2,
+    layout_matrix = rbind(
+        c(1,1,1,NA,NA,NA),
+        c(1,1,1,NA,NA,NA),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,NA,NA,NA),
+        c(1,1,1,NA,NA,NA)
+    )
+)
+
+
+grid.arrange(
+    plot_mclust_formants(mclust_best_results[[6]], group_colors, group_shapes),
+    mclust_best_tallies[[6]] %>% plot_vowel_tallies(),
+    ncol = 2,
+    layout_matrix = rbind(
+        c(1,1,1,NA,NA,NA),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,NA,NA,NA)
+    )
+)
+
+```
+
+### 4-cluster and 5-cluster models
+
+```{r Plot 4- and 5-cluster models, warning=FALSE, fig.width=12, fig.height=7}
+
+grid.arrange(
+    plot_mclust_formants(mclust_best_results[[7]], group_colors, group_shapes),
+    mclust_best_tallies[[7]] %>% plot_vowel_tallies(),
+    ncol = 2,
+    layout_matrix = rbind(
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2)
+    )
+)
+
+grid.arrange(
+    plot_mclust_formants(mclust_best_results[[8]], group_colors, group_shapes),
+    mclust_best_tallies[[8]] %>% plot_vowel_tallies(),
+    ncol = 2,
+    layout_matrix = rbind(
+        # c(1,1,1,NA,NA,NA),
+        # c(1,1,1,NA,NA,NA),
+        c(NA,NA,NA,2,2,2),
+        c(NA,NA,NA,2,2,2),
+        c(NA,NA,NA,2,2,2),
+        c(NA,NA,NA,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(1,1,1,2,2,2),
+        c(NA,NA,NA,2,2,2),
+        c(NA,NA,NA,2,2,2),
+        c(NA,NA,NA,2,2,2),
+        c(NA,NA,NA,2,2,2)
+        # c(1,1,1,NA,NA,NA),
+        # c(1,1,1,NA,NA,NA)
+    )
+)
+
+```
+
+# Comparison across optimal models and human annotators
+
+```{r Most frequently-assigned IPA labels}
+mclust_best_tallies[5:8] %>%
+    bind_rows() %>%
+    filter(pc_vowels > 10) %>%
+    select(-tracker) %>%
+    mutate(pc_vowels = round(pc_vowels, digits = 0))
+```
+
+## Distribution of non-tonic schwas
+
+```{r Non-tonic schwas, message=FALSE}
+mclust_best_results[5:8] %>%
+    map_df(~ .$classifications) %>%
+    left_join(
+        tibble(
+            G = c(2,3,4,5),
+            clust = c(2,2,4,5),
+            base_vowel = "ə"
+        ),
+        .
+    ) %>%
+    mutate(is_tonic = vowel_num == 1) %>%
+    group_by(G, clust, is_tonic) %>%
+    tally() %>%
+    group_by(G, clust) %>%
+    mutate(pc = n / sum(n) * 100)
+
+```
+
+
+# Distribution of contexts within vowel categories
+
+```{r Compute distribution of contexts, include=FALSE}
+consonants <- read_csv(here("data/external/consonants.csv"))
+vowels     <- read_csv(here("data/external/vowels.csv"))
+headwords  <- read_csv(here("data/external/headwords.csv"))
+
+precluster_annotations <- 
+    vowels_med_analysis %>%
+    group_by(source_file, rep_num, vowel_num) %>%
+    select(annotator) %>% 
+    nest() %>%
+    mutate(token_annotators = map_chr(data, ~ pull(., "annotator") %>% paste0(collapse = ", "))) %>%
+    unnest() %>%
+    ungroup() %>%
+    # To solve. What to do about tokens with not exactly 2 annotators (some 1, some more than 2); very rare, though
+    filter(str_count(token_annotators, ",") == 1)
+
+const_groups <- expand.grid(
+    c1 = consonants$const,
+    c2 = consonants$const,
+    stringsAsFactors = FALSE) %>%
+    mutate(const_ctx = paste(c1, c2, sep = "_")) %>%
+    left_join(rename(consonants, c1 = const, c1_group = const_place))%>%
+    left_join(rename(consonants, c2 = const, c2_group = const_place)) %>%
+    mutate(const_group = paste(c1_group, c2_group, sep = "_")) %>%
+    select(const_ctx, const_group)
+
+const_dists_analysis <- 
+    mclust_best_results[[7]]$classifications %>%
+    left_join(precluster_annotations) %>%
+    filter(!is.na(token_annotators)) %>% 
+    # See problem above. Separate will fail if not exactly 2 pieces to separate into.
+    separate(token_annotators, into = c("a1", "a2"), sep = ", ") %>% 
+    mutate(
+        other_annot = ifelse(annotator != a1, a1, a2) 
+    ) %>%
+    left_join(vowels_med_analysis %>% select(source_file, rep_num, vowel_num, annotator, const_ctx)) %>%
+    left_join(vowels_med_analysis %>% select(source_file, rep_num, vowel_num, other_annot = annotator, other_vowel = base_vowel, other_ctx = const_ctx)) %>%
+    left_join(
+        tibble(
+            clust = c(1, 2, 3, 4),
+            gmm_group = c("central", "low", "front", "back")
+        )
+    ) %>%
+    left_join(rename(vowels, a1_vgroup = vowel_group)) %>%
+    left_join(rename(vowels, other_vowel = base_vowel, a2_vgroup = vowel_group)) %>% 
+    filter(gmm_group == a1_vgroup | a1_vgroup == a2_vgroup) %>%
+    left_join(const_groups) %>%
+    left_join(rename(const_groups, other_ctx = const_ctx, a2_const_group = const_group)) %>%
+    filter(const_group == a2_const_group) %>%
+    left_join(mutate(headwords, headword = str_to_lower(headword))) %>% 
+    separate(const_group, into = c("const_left", "const_right"), sep = "_") %>%
+    mutate_at(vars("gmm_group", "const_left", "const_right"), funs(str_to_title))
+
+const_dists_plot <-
+    const_dists_analysis %>% 
+    group_by(gmm_group, const_left, const_right) %>%
+    summarise(
+        n_tokens = n(),
+        n_types  = unique(headword) %>% length()
+    ) %>%
+    group_by(gmm_group) %>%
+    mutate(
+        n_vowels = sum(n_tokens),
+        pc_token = round(n_tokens / n_vowels * 100, 1),
+        text     = paste(pc_token, "%\n (", n_types, ")", sep = ""),
+        vgroup_label = paste(gmm_group, " (n = ", n_vowels, ")", sep = "")
+    )
+```
+
+```{r Plot context distributions, fig.width=8, fig.height=8}
+const_dists_plot %>% 
+    ggplot(aes(x = const_right, y = const_left)) +
+    geom_tile(aes(fill = pc_token), color = "black") +
+    geom_text(aes(label = text)) +
+    facet_wrap(~ vgroup_label, scales = "free") +
+    scale_fill_gradient(low = "#ffffff", high = "#969696") +
+    xlab("Following consonant") +
+    ylab("Preceding consonant")
+```
+
+# Distribution of vowel categories across vowel positions
+
+```{r Plot position distributions, fig.width=8}
+const_dists_analysis %>% 
+    group_by(vowel_num, gmm_group) %>%
+    summarise(
+        n_tokens = n(),
+        n_types  = unique(headword) %>% length()
+    ) %>%
+    filter(vowel_num <= 4) %>% 
+    group_by(vowel_num) %>% 
+    mutate(
+        n_vowels = sum(n_tokens),
+        pc_token = round(n_tokens / n_vowels * 100, 1),
+        text     = paste(pc_token, "%\n (", n_tokens, ")", sep = ""),
+        vgroup_label = paste(gmm_group, " (n = ", n_vowels, ")", sep = "")
+    ) %>%
+    ungroup %>% 
+    mutate(
+        bar_label = paste("(", n_types, ")", sep = ""),
+        vowel_num = paste("M", vowel_num, " (n = ", n_vowels, ")", sep = "")
+    ) %>%
+    ggplot(aes(x = as.factor(gmm_group), y = pc_token)) +
+    geom_bar(stat = "identity", fill = "white", color = "black", width = 0.8) +
+    geom_text(aes(label = bar_label), vjust = -0.6, y = 0)+
+    facet_wrap(~ vowel_num, ncol = 5, scales = "free_x") +
+    xlab("Medial vowel position in word") +
+    ylab("Proportion of occurrence within position") +
+    scale_y_continuous(limits = c(0, 65)) +
+    theme(
+        panel.grid.major = element_line(colour = "#f0f0f0"),
+        axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+```
+
+
+<style type="text/css">
+h1, h2, h3, h4, h5 { font-size:1.1em }
+</style>
