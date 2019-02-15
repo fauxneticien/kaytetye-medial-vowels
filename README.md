@@ -1,5 +1,7 @@
 # Kaytetye medial vowels: dataset and processing scripts
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.2565718.svg)](https://doi.org/10.5281/zenodo.2565718)
+
 ### Nay San, Michael Proctor, Mark Harvey, Myfany Turpin, Alison Ross
 
 This repository contains the datasets, processing, and analysis scripts for an analysis on medial vowels in Kaytetye, an Australian Aboriginal language.
