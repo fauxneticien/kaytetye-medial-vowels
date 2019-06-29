@@ -3,6 +3,7 @@
 
 install.packages(c(
     "DT",
+    "furrr",
     "here",
     "gridExtra",
     "ggrepel",
